@@ -3,7 +3,7 @@
 name: Score Submission
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize]
     paths:
       - 'submissions/inbox/*.enc'
@@ -16,10 +16,11 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (main)
         uses: actions/checkout@v4
         with:
-          # Fetch the full history to get the main branch
+          # In pull_request_target, this defaults to the base branch (main)
+          ref: main
           fetch-depth: 0
 
       - name: Set up Python
@@ -31,18 +32,27 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      - name: Checkout submission from PR
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr_submission
+          sparse-checkout: |
+            submissions/inbox
+
       - name: Find submission file
         id: find_file
         run: |
-          echo "Searching for submission file in submissions/inbox/"
+          echo "Searching for submission file in pr_submission/submissions/inbox/"
           # List all files to see what's there
-          ls -R submissions/inbox/
+          ls -R pr_submission/submissions/inbox/
           
-          # Find the first ENC file
-          SUBMISSION_FILE=$(find submissions/inbox/ -name '*.enc' -type f | head -n 1)
+          # Find the first ENC file in the PR checkout path
+          SUBMISSION_FILE=$(find pr_submission/submissions/inbox/ -name '*.enc' -type f | head -n 1)
           
           if [ -z "$SUBMISSION_FILE" ]; then
-            echo "Error: No encrypted submission file found."
+            echo "Error: No encrypted submission file found in PR."
             exit 1
           fi
           
@@ -55,6 +65,7 @@ jobs:
           SUBMISSION_PRIVATE_KEY: ${{ secrets.SUBMISSION_PRIVATE_KEY }}
         run: |
           echo "Decrypting submission..."
+          # Run the script from main branch, using the file from the PR
           python competition/decrypt_submission.py "${{ steps.find_file.outputs.submission_file }}"
           
           if [ ! -f "decrypted_submission.csv" ]; then
